@@ -5,20 +5,21 @@ Feature supported:
 - able to retrieve change packages base on project.
 - load change packages into Mercurial as commits with proper change package information.
 
-Problem:
+Problems:
 - Shared project not supported yet.
+- So far only change package on main branch is imported.
 - Some file deleted within same project version can't retrieve because of MKS's ability.
 - File rename not case sensitive. (Windows limits)
 - Multiple revision in same MKS change package, only the latest revision will in Mercurial's commit.
 
 ### Requirement
-- Python 2.7
+- Tested with Python 2.7
 - MKS on Windows
 - Mercurial on Windows
 
 ### Usage.
-1. connect/authenticate MKS with MKS client.
-2. run tool with specifying:
+1. connect/authenticate MKS with MKS client (no authentication in tool).
+2. run tool with specifying arguments:
   - project url to import to Mercurial
   - local directory to save Mercurial repository.
   
