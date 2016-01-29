@@ -3,7 +3,7 @@ from itertools      import imap, ifilter
 from sets           import Set
 from datetime       import datetime
 from sys            import argv
-import os
+import os, errno
 
 def parse_time(stime):
     try:
@@ -158,7 +158,11 @@ class ActionCreateSubPrj(Action):
 #''' Drop Subproject '''
 class ActionDropSubPrj(Action):
     def make_change(self, prj_dir):
-        os.rmdir(prj_dir + self.fname[:self.fname.rindex("project.pj")])
+        try:
+            os.rmdir(prj_dir + self.fname[:self.fname.rindex("project.pj")])
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise
 
 #''' Supported actions in Change Package '''
 dict_str_class = { 'Add'                : ActionUpdate,
