@@ -1,4 +1,4 @@
-from Commander      import Commander 
+from Commander      import Commander
 from itertools      import imap, ifilter
 from sets           import Set
 from datetime       import datetime
@@ -39,19 +39,11 @@ class Member(object):
             try:
                 return self.sview()
             except:
-                self.prj.viewhistory()
+                pass
 
         # find proper project revision related.
-        prj_rev = None
-        for (r, t) in reversed(self.prj.history):
-            if t > self.ctime:
-                prj_rev = r
-                break
-        if prj_rev == None:
-            raise Exception("Unable to find project revision")
-
         options = { 'revision'          : self.rev,
-                    'projectRevision'   : prj_rev,
+                    'projectRevision'   : self.prj.get_revision_after(self.ctime),
                     'project'           : self.prj }
         try:
             return self.mks.viewrevision(self.name, **options)
@@ -91,6 +83,7 @@ class Action(object):
     def __str__(self):
         return str((self.__class__, self.fname, self.rev, str(self.project)))
 
+    # abstract method.
     def update_fs(self, prj):
         pass
 
@@ -99,88 +92,77 @@ class Action(object):
             return root_dpath + self.project.path[len(root_project.path[:-10]) : -10]
         return None
 
-#''' Add File '''
-class ActionAdd(Action):
     def apply_change(self, prj, path):
         subpath = self.get_path(prj, path)
         if subpath != None:
-            spath = subpath + self.fname
-            mem = Member(self.mks, self.ctime, self.project, self.fname, self.rev)
-            mem.saveas(spath)
+            self.make_change(subpath)
 
-#''' Update File '''
+    # abstract method.
+    def make_change(self, subpath):
+        raise NotImplementedError("Must override methodB")
+
+#''' Add File ''' && ''' Update File '''
 class ActionUpdate(Action):
-    def apply_change(self, prj, path):
-        subpath = self.get_path(prj, path)
-        if subpath != None:
-            spath = subpath + self.fname
-            mem = Member(self.mks, self.ctime, self.project, self.fname, self.rev)
-            mem.saveas(spath)
+    def make_change(self, subpath):
+        mem = Member(self.mks, self.ctime, self.project, self.fname, self.rev)
+        mem.saveas(subpath + self.fname)
 
 #''' Rename File '''
 class ActionRename(Action):
-    def apply_change(self, prj, path):
-        subpath = self.get_path(prj, path)
-        if subpath != None:
-            # "name (nameb)"
-            li  = self.fname.index('(')
-            lr  = self.fname.rindex(')')
-            dst = subpath + self.fname[    :li-1]
-            src = subpath + self.fname[li+1:lr]
-            # in case dst already there,
-            # it means the wrong order of actions
-            # in change package
-            # so we just delete the src file.
-            print "= Info: Rename file from %s to %s" % (src, dst)
-            if os.path.exists(dst):
-                # windows isn't case sensitive
-                if src.upper() != dst.upper():
-                    os.remove(src)
-            else:
-                os.rename(src, dst) 
+    def parse_name(self):
+        # "name (nameb)"
+        bl  = self.fname.index('(')
+        br  = self.fname.rindex(')')
+        return (self.fname[bl+1:br], self.fname[:bl-1])
+
+    def make_change(self, subpath):
+        src, dst = self.parse_name()
+        dst = subpath + dst
+        src = subpath + src
+        # in case dst already there,
+        # it means the wrong order of actions
+        # in change package
+        # so we just delete the src file.
+        print "= Info: Rename file from %s to %s" % (src, dst)
+        if os.path.exists(dst):
+            # windows isn't case sensitive
+            if src.upper() != dst.upper():
+                os.remove(src)
+        else:
+            os.rename(src, dst)
 
     def update_fs(self, prj):
         if self.project.is_subprj(prj):
-            # "name (nameb)"
-            li  = self.fname.index('(')
-            lr  = self.fname.rindex(')')
-            dst = self.fname[    :li-1]
-            src = self.fname[li+1:lr]
-            self.project.rename_member(src, dst) 
+            src, dst = self.parse_name()
+            self.project.rename_member(src, dst)
 
 #''' Drop File '''
 class ActionDrop(Action):
-    def apply_change(self, prj, path):
-        subpath = self.get_path(prj, path)
-        if subpath != None:
-            try:
-                os.remove(subpath + self.fname)
-            except Exception as e:
-                print "= Error: unable delete file %s: %s" %(subpath + self.fname, e)
+    def make_change(self, subpath):
+        try:
+            os.remove(subpath + self.fname)
+        except Exception as e:
+            print "= Error: unable delete file %s: %s" %(subpath + self.fname, e)
 
 #''' Create Subproject '''
 class ActionCreateSubPrj(Action):
-    def apply_change(self, prj, path):
-        subpath = self.get_path(prj, path)
-        if subpath != None:
-            dpath = subpath + self.fname[:self.fname.rindex("project.pj")]
-            try:
-                os.mkdir(dpath)
-            except Exception as e:
-                print "= Error: unable mkdir %s: %s" % (dpath, e)
-                print "= Error: use makedirs instead!"
-                os.makedirs(dpath)
+    def make_change(self, subpath):
+        dpath = subpath + self.fname[:self.fname.rindex("project.pj")]
+        try:
+            os.mkdir(dpath)
+        except Exception as e:
+            print "= Error: unable mkdir %s: %s" % (dpath, e)
+            print "= Error: use makedirs instead!"
+            os.makedirs(dpath)
 
 #''' Drop Subproject '''
 class ActionDropSubPrj(Action):
-    def apply_change(self, prj, path):
-        subpath = self.get_path(prj, path)
-        if subpath != None:
-            os.rmdir(subpath + self.fname[:self.fname.rindex("project.pj")])
+    def make_change(self, subpath):
+        os.rmdir(subpath + self.fname[:self.fname.rindex("project.pj")])
 
 #''' Supported actions in Change Package '''
-dict_str_class = { 'Add'                : ActionAdd,
-                   'Add From Archive'   : ActionAdd,            # extra
+dict_str_class = { 'Add'                : ActionUpdate,
+                   'Add From Archive'   : ActionUpdate,         # extra
                    'Create Subproject'  : ActionCreateSubPrj,
                    'Add Subproject'     : ActionCreateSubPrj,   # extra
                    'Update'             : ActionUpdate,
@@ -222,7 +204,7 @@ class ChangePackage(object):
         lines = out.splitlines()
         _, summary = lines[0].split('\t', 1)           # summary
         author, _, stime, _ = lines[1].split('\t', 3)  # author and closed time
-        # ignore pending cp. 
+        # ignore pending cp.
         if stime[:6] != 'Closed':
             return
         ctime = parse_time(stime[8:][:-1])
@@ -265,6 +247,13 @@ class Project(object):
         r = filter(lambda x : x[0] == src, self.renames)
         return map(lambda x : x[1], r)
 
+    def get_revision_after(self, time):
+        self.viewhistory()
+        prj_rev = next(r for (r, t) in reversed(self.history) if t > time)
+        if prj_rev == None:
+            raise Exception("Unable to find project revision")
+        return prj_rev
+
     # get list cp for current project
     def rlog(self, onlyClosed=True):
         options = { 'noheaderformat'  : True,
@@ -300,9 +289,6 @@ class Project(object):
 
     def is_subprj(self, prj):
         return self.path.startswith(prj.path[:-10])
-
-def hg_init(hg, path):
-    hg.init(dst)
 
 def hg_commit(hg, path, cp):
     os.chdir(path)
