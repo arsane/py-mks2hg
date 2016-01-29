@@ -14,8 +14,8 @@ Problems:
 
 ### Requirement
 - Tested with Python 2.7
-- MKS on Windows
-- Mercurial on Windows
+- MKS on Windows and MKS command line in path environment variable.
+- Mercurial on Windows and command in path environment variable.
 
 ### Usage.
 1. connect/authenticate MKS with MKS client (no authentication in tool).
