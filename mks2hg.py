@@ -3,7 +3,7 @@ from itertools      import imap, ifilter
 from sets           import Set
 from datetime       import datetime
 from sys            import argv
-import os, errno
+import os, errno, shutil
 
 def parse_time(stime):
     try:
@@ -51,8 +51,9 @@ class Member(object):
             pass
 
         # 3. get file by other file name in case the file was renamed.
-        for alias in self.prj.get_member_alias(self.name):
+        for alias, ctime in self.prj.get_member_alias(self.name):
             try:
+                options['projectRevision'] = self.prj.get_revision_after(ctime)
                 return self.mks.viewrevision(alias, **options)
             except Exception as et:
                 print "= Error: unable to view file %s at revision %s: %s" % (self.name, self.rev, et)
@@ -139,7 +140,7 @@ class ActionRename(Action):
     def update_fs(self, root_prj):
         if self.prj in root_prj:
             src, dst = self.parse_name()
-            self.prj.rename_member(src, dst)
+            self.prj.rename_member(src, dst, self.ctime)
 
 #''' Drop File '''
 class ActionDrop(Action):
@@ -164,11 +165,12 @@ class ActionCreateSubPrj(Action):
 #''' Drop Subproject '''
 class ActionDropSubPrj(Action):
     def make_change(self, prj_dir):
+        dpath = prj_dir + self.fname[:self.fname.rindex("project.pj")]
         try:
-            os.rmdir(prj_dir + self.fname[:self.fname.rindex("project.pj")])
+            os.rmdir(dpath)
         except OSError as e:
             if e.errno != errno.ENOENT:
-                raise
+                shutil.rmtree(dpath)
 
 #''' Supported actions in Change Package '''
 dict_str_class = { 'Add'                : ActionUpdate,
@@ -249,12 +251,14 @@ class Project(object):
     def __str__(self):
         return self.path
 
-    def rename_member(self, src, dst):
-        self.renames.append((src, dst))
+    def rename_member(self, src, dst, ctime):
+        self.renames.append((src, dst, ctime))
 
     def get_member_alias(self, src):
         r = filter(lambda x : x[0] == src, self.renames)
-        return map(lambda x : x[1], r)
+        alias = map(lambda x : (x[1], x[2]), r)
+        # recursively get all alias
+        return alias + reduce(lambda x, y : x + y, map(lambda x : self.get_member_alias(x[0]), alias), [])
 
     def get_revision_after(self, time):
         self.get_revisions()
