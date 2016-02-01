@@ -34,26 +34,31 @@ class Member(object):
         return self.mks.viewrevision(self.name, **options)
 
     def read(self):
+        # 1. get file without specify revision.
         if len(self.prj.revisions) == 0:
             try:
                 return self.read_fast()
             except:
                 pass
 
-        # read by specify project revision
+        # 2. read by specify project revision
         options = { 'revision'          : self.rev,
                     'projectRevision'   : self.prj.get_revision_after(self.time),
                     'project'           : self.prj }
         try:
             return self.mks.viewrevision(self.name, **options)
-        except Exception as e:
-            for alias in self.prj.get_member_alias(self.name):
-                try:
-                    return self.mks.viewrevision(alias, **options)
-                except Exception as et:
-                    print "= Error: unable to view file %s at revision %s: %s" % (self.name, self.rev, et)
-                    pass
-            raise e
+        except:
+            pass
+
+        # 3. get file by other file name in case the file was renamed.
+        for alias in self.prj.get_member_alias(self.name):
+            try:
+                return self.mks.viewrevision(alias, **options)
+            except Exception as et:
+                print "= Error: unable to view file %s at revision %s: %s" % (self.name, self.rev, et)
+
+        # 4. raise exception after all the fails
+        raise Exception("Unable to read file")
 
     # save to specified path.
     def save(self, fpath):
@@ -148,12 +153,13 @@ class ActionDrop(Action):
 class ActionCreateSubPrj(Action):
     def make_change(self, prj_dir):
         dpath = prj_dir + self.fname[:self.fname.rindex("project.pj")]
-        try:
-            os.mkdir(dpath)
-        except Exception as e:
-            print "= Error: unable mkdir %s: %s" % (dpath, e)
-            print "= Error: use makedirs instead!"
-            os.makedirs(dpath)
+        if not os.path.exists(dpath):
+            try:
+                os.mkdir(dpath)
+            except Exception as e:
+                print "= Error: unable mkdir %s: %s" % (dpath, e)
+                print "= Error: use makedirs instead!"
+                os.makedirs(dpath)
 
 #''' Drop Subproject '''
 class ActionDropSubPrj(Action):
