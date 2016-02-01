@@ -264,7 +264,7 @@ class Project(object):
         return prj_rev
 
     # get list cp for current project
-    def rlog(self, onlyClosed=True):
+    def rlog(self, cpsIgnore, onlyClosed=True):
         options = { 'noheaderformat'  : True,
                     'noTrailerFormat' : True,
                     'fields'          : 'cpid',
@@ -276,7 +276,7 @@ class Project(object):
         # drop empty line
         lines = filter(lambda x: x!= "", out.splitlines())
         # sort change package.
-        cps = map(lambda id : ChangePackage(self.mks, id, viewinfo=True), sorted(set(lines)))
+        cps = map(lambda id : ChangePackage(self.mks, id, viewinfo=True), sorted(set(lines) - set(cpsIgnore)))
         if onlyClosed:
             return sorted(filter(lambda x : x.info != None and x.info['closeddate'] != None, cps), key=lambda x : x.info['closeddate'])
         else:
@@ -312,12 +312,37 @@ def hg_commit(hg, path, cp):
         print "= Error: unable to commit cp(%s): %s" % (cp.id, e)
         print "= Error: ignore error!"
 
+def hg_get_commited_cps(hg, path):
+    os.chdir(path)
+    options = { 'template' : '{desc}\\n' }
+    out = hg.log(**options)
+    cps = []
+    for line in out.splitlines():
+        try:
+            li = line.index('[')
+            ri = line.index(']')
+            if li == 0:
+                cps.append(line[li+1:ri])
+        except:
+            pass
+    return set(cps)
+
 def mks2hg(prj_path, root_dir):
     mks = Commander('si', '=')
     hg  = Commander('hg', ' ')
     root_prj = mks_get_project(mks, prj_path)
-    cps = root_prj.rlog()
-    hg.init(root_dir)
+
+    # if hg already created, working on resync mode
+    cp_syned = []
+    if os.path.exists(root_dir + '/' + '.hg'):
+        cp_syned = hg_get_commited_cps(hg, root_dir)
+    else:
+        hg.init(root_dir)
+
+    # retrieve list of cp to sync.
+    cps = root_prj.rlog(cpsIgnore=cp_syned)
+
+    # sync change packages.
     for cp in cps:
         cp.update_fs(root_prj)
     for cp in cps:
