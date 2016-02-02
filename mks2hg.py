@@ -20,7 +20,6 @@ def mks_get_project(mks, ppath):
 
 class Member(object):
     def __init__(self, mks, time, prj, name, rev):
-        super(Member, self).__init__()
         self.mks        = mks
         self.prj        = prj
         self.name       = name.strip()
@@ -55,8 +54,8 @@ class Member(object):
             try:
                 options['projectRevision'] = self.prj.get_revision_after(ctime)
                 return self.mks.viewrevision(alias, **options)
-            except Exception as et:
-                print "= Error: unable to view file %s at revision %s: %s" % (self.name, self.rev, et)
+            except:
+                pass
 
         # 4. raise exception after all the fails
         raise Exception("Unable to read file")
@@ -72,13 +71,11 @@ class Member(object):
             with open(fpath, 'wb') as f:
                 f.write(out)
         except Exception as e:
-            print "= Error: unable to save file %s, %s" %(fpath, e)
-            pass
+            print "= Warn: unable to save file %s, %s" %(fpath, e)
 
 # Abstract action class
 class Action(object):
     def __init__(self, mks, desc, ctime, fname, rev, prj):
-        super(Action, self).__init__()
         self.mks        = mks
         self.desc       = desc
         self.ctime      = ctime
@@ -148,7 +145,7 @@ class ActionDrop(Action):
         try:
             os.remove(prj_dir + self.fname)
         except Exception as e:
-            print "= Error: unable delete file %s: %s" %(prj_dir + self.fname, e)
+            print "= Warn: unable delete file %s: %s" %(prj_dir + self.fname, e)
 
 #''' Create Subproject '''
 class ActionCreateSubPrj(Action):
@@ -158,8 +155,8 @@ class ActionCreateSubPrj(Action):
             try:
                 os.mkdir(dpath)
             except Exception as e:
-                print "= Error: unable mkdir %s: %s" % (dpath, e)
-                print "= Error: use makedirs instead!"
+                print "= Warn: unable mkdir %s: %s" % (dpath, e)
+                print "= Warn: use makedirs instead!"
                 os.makedirs(dpath)
 
 #''' Drop Subproject '''
@@ -184,8 +181,7 @@ dict_str_class = { 'Add'                : ActionUpdate,
                    'Drop Subproject'    : ActionDropSubPrj }
 
 class ChangePackage(object):
-    def __init__(self, mks, id, viewinfo=False):
-        super(ChangePackage, self).__init__()
+    def __init__(self, mks, id, viewinfo=True):
         self.mks     = mks
         self.id      = id.strip()
         self.actions = []
@@ -206,7 +202,10 @@ class ChangePackage(object):
         if action in dict_str_class:
             self.actions.append(dict_str_class[action](self.mks, action, ctime, fname, revision, mks_get_project(self.mks, prj_path)))
         else:
-            print "= Error: Unkown action", action
+            print "= Warn: Unkown action", action
+
+    def is_closed(self):
+        return self.info != None and self.info['closeddate'] != None
 
     def view(self):
         options = {'noshowReviewLog'        : True,
@@ -240,13 +239,11 @@ class ChangePackage(object):
             act.update_fs(prj)
 
 class Project(object):
-
     def __init__(self, mks, path):
-        super(Project, self).__init__()
         self.mks         = mks
         self.path        = path.strip()
         self.revisions   = []
-        self.renames     = [] # rude way to deal with renamed file
+        self.renames     = []
 
     def __str__(self):
         return self.path
@@ -261,14 +258,14 @@ class Project(object):
         return alias + reduce(lambda x, y : x + y, map(lambda x : self.get_member_alias(x[0]), alias), [])
 
     def get_revision_after(self, time):
-        self.get_revisions()
+        self.__get_revisions()
         prj_rev = next(r for (r, t) in reversed(self.revisions) if t > time)
         if prj_rev == None:
             raise Exception("Unable to find project revision")
         return prj_rev
 
     # get list cp for current project
-    def rlog(self, cpsIgnore, onlyClosed=True):
+    def get_changepackages(self, id_filter):
         options = { 'noheaderformat'  : True,
                     'noTrailerFormat' : True,
                     'fields'          : 'cpid',
@@ -277,16 +274,17 @@ class Project(object):
                     'project'         : self.path }
         print "= Info: Fetching project log report (%s)..." % self.path
         out = self.mks.rlog(**options)
-        # drop empty line
-        lines = filter(lambda x: x!= "", out.splitlines())
-        # sort change package.
-        cps = map(lambda id : ChangePackage(self.mks, id, viewinfo=True), sorted(set(lines) - set(cpsIgnore)))
-        if onlyClosed:
-            return sorted(filter(lambda x : x.info != None and x.info['closeddate'] != None, cps), key=lambda x : x.info['closeddate'])
-        else:
-            return cps
 
-    def get_revisions(self):
+        # drop empty line
+        lines = filter(lambda x: x!= "" and (id_filter == None or id_filter(x)), set(out.splitlines()))
+
+        # sort change package.
+        cps = map(lambda id : ChangePackage(self.mks, id), sorted(lines))
+
+        # only return closed cp.
+        return sorted(filter(lambda x : x.is_closed(), cps), key=lambda x : x.info['closeddate'])
+
+    def __get_revisions(self):
         if len(self.revisions) != 0:
             return
 
@@ -296,6 +294,7 @@ class Project(object):
                     'project'         : self.path }
         out = self.mks.viewprojecthistory(**options)
         lines = filter(lambda x: x!= "", out.splitlines())
+
         # ignore first line for project path
         for line in lines[1:]:
             rev, stime = line.strip().split('\t')
@@ -313,8 +312,8 @@ def hg_commit(hg, path, cp):
     try:
         hg.commit(**options)
     except Exception as e:
-        print "= Error: unable to commit cp(%s): %s" % (cp.id, e)
-        print "= Error: ignore error!"
+        print "= Warn: unable to commit cp(%s): %s" % (cp.id, e)
+        print "= Warn: ignore error!"
 
 def hg_get_commited_cps(hg, path):
     os.chdir(path)
@@ -344,7 +343,7 @@ def mks2hg(prj_path, root_dir):
         hg.init(root_dir)
 
     # retrieve list of cp to sync.
-    cps = root_prj.rlog(cpsIgnore=cp_syned)
+    cps = root_prj.get_changepackages(lambda id : id not in set(cp_syned))
 
     # sync change packages.
     for cp in cps:
