@@ -1,9 +1,9 @@
-from Commander      import Commander
 from itertools      import imap, ifilter
 from sets           import Set
 from datetime       import datetime
-from sys            import argv
-import os, errno, shutil
+from optparse       import OptionParser
+from Commander      import Commander
+import os, errno, shutil, logging
 
 def parse_time(stime):
     try:
@@ -62,7 +62,7 @@ class Member(object):
 
     # save to specified path.
     def save(self, fpath):
-        print "= Info: Saving file(rev : %s) %s" % (self.rev, fpath)
+        logging.debug("Saving file(rev : %s) %s" % (self.rev, fpath))
         try:
             if not os.path.exists(os.path.dirname(fpath)):
                 os.makedirs(os.path.dirname(fpath))
@@ -71,7 +71,7 @@ class Member(object):
             with open(fpath, 'wb') as f:
                 f.write(out)
         except Exception as e:
-            print "= Warn: unable to save file %s, %s" %(fpath, e)
+            logging.warn("unable to save file %s, %s" %(fpath, e))
 
 # Abstract action class
 class Action(object):
@@ -126,7 +126,7 @@ class ActionRename(Action):
         # it means the wrong order of actions
         # in change package
         # so we just delete the src file.
-        print "= Info: Rename file from %s to %s" % (src, dst)
+        logging.debug("Rename file from %s to %s" % (src, dst))
         if os.path.exists(dst):
             # windows isn't case sensitive
             if src.upper() != dst.upper():
@@ -145,7 +145,7 @@ class ActionDrop(Action):
         try:
             os.remove(prj_dir + self.fname)
         except Exception as e:
-            print "= Warn: unable delete file %s: %s" %(prj_dir + self.fname, e)
+            logging.warn("Unable delete file %s: %s" %(prj_dir + self.fname, e))
 
 #''' Create Subproject '''
 class ActionCreateSubPrj(Action):
@@ -155,8 +155,8 @@ class ActionCreateSubPrj(Action):
             try:
                 os.mkdir(dpath)
             except Exception as e:
-                print "= Warn: unable mkdir %s: %s" % (dpath, e)
-                print "= Warn: use makedirs instead!"
+                logging.warn("Unable mkdir %s: %s" % (dpath, e))
+                logging.warn("Use makedirs instead!")
                 os.makedirs(dpath)
 
 #''' Drop Subproject '''
@@ -202,7 +202,7 @@ class ChangePackage(object):
         if action in dict_str_class:
             self.actions.append(dict_str_class[action](self.mks, action, ctime, fname, revision, mks_get_project(self.mks, prj_path)))
         else:
-            print "= Warn: Unkown action", action
+            logging.error("Unknown action %s" % action)
 
     def is_closed(self):
         return self.info != None and self.info['closeddate'] != None
@@ -211,8 +211,7 @@ class ChangePackage(object):
         options = {'noshowReviewLog'        : True,
                    'noshowPropagationInfo'  : True}
         out = self.mks.viewcp(self.id, **options)
-        print '\n'
-        print out
+        logging.debug('\n' + out)
         lines = out.splitlines()
         _, summary = lines[0].split('\t', 1)           # summary
         author, _, stime, _ = lines[1].split('\t', 3)  # author and closed time
@@ -272,12 +271,13 @@ class Project(object):
                     'rfilter'         : 'branch::current',
                     'recurse'         : True,
                     'project'         : self.path }
-        print "= Info: Fetching project log report (%s)..." % self.path
+        logging.info("Fetching change package ids on (%s)..." % self.path)
         out = self.mks.rlog(**options)
 
         # drop empty line
         lines = filter(lambda x: x!= "" and (id_filter == None or id_filter(x)), set(out.splitlines()))
 
+        logging.info("Get details info for %d change packages" % len(lines))
         # sort change package.
         cps = map(lambda id : ChangePackage(self.mks, id), sorted(lines))
 
@@ -312,8 +312,7 @@ def hg_commit(hg, path, cp):
     try:
         hg.commit(**options)
     except Exception as e:
-        print "= Warn: unable to commit cp(%s): %s" % (cp.id, e)
-        print "= Warn: ignore error!"
+        logging.warn("Unable to commit cp(%s): %s" % (cp.id, e))
 
 def hg_get_commited_cps(hg, path):
     os.chdir(path)
@@ -348,13 +347,26 @@ def mks2hg(prj_path, root_dir):
     # sync change packages.
     for cp in cps:
         cp.update_fs(root_prj)
+
+    #
+    logging.info("Applying change packages...")
     for cp in cps:
-        print cp
+        logging.debug(cp)
         cp.apply_change(root_prj, root_dir)
         hg_commit(hg, root_dir, cp)
 
 if __name__ == '__main__':
-    if len(argv) != 3:
-        print "Help: %s project directory" % argv[0]
-        exit(1)
-    mks2hg(argv[1], argv[2])
+    usage = "usage: %prog [options] project directory"
+    parser = OptionParser(usage=usage, version="%prog 1.0")
+    parser.add_option("-v", "--verbose",
+                      action="store_true", dest="verbose", default=True,
+                      help="print status message to stdout [default]")
+    parser.add_option("-q", "--quiet",
+                      action="store_false", dest="verbose",
+                      help="disable status message")
+    (options, args) = parser.parse_args()
+    if options.verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+    mks2hg(args[0], args[1])
