@@ -74,7 +74,7 @@ class Member(object):
             logging.warn("unable to save file %s, %s" %(fpath, e))
 
 # Abstract action class
-class Action(object):
+class Change(object):
     def __init__(self, mks, desc, ctime, fname, rev, prj):
         self.mks        = mks
         self.desc       = desc
@@ -99,19 +99,21 @@ class Action(object):
         prj_dir = self.get_project_dir(root_prj, root_dir)
         if prj_dir != None:
             self.make_change(prj_dir)
+            return True
+        return False
 
     # abstract method.
     def make_change(self, prj_dir):
         raise NotImplementedError("Must override method")
 
 #''' Add File ''' && ''' Update File '''
-class ActionUpdate(Action):
+class FileUpdate(Change):
     def make_change(self, prj_dir):
         mem = Member(self.mks, self.ctime, self.prj, self.fname, self.rev)
         mem.save(prj_dir + self.fname)
 
 #''' Rename File '''
-class ActionRename(Action):
+class FileRename(Change):
     def parse_name(self):
         # "name (nameb)"
         bl  = self.fname.index('(')
@@ -140,7 +142,7 @@ class ActionRename(Action):
             self.prj.rename_member(src, dst, self.ctime)
 
 #''' Drop File '''
-class ActionDrop(Action):
+class FileDrop(Change):
     def make_change(self, prj_dir):
         try:
             os.remove(prj_dir + self.fname)
@@ -148,7 +150,7 @@ class ActionDrop(Action):
             logging.warn("Unable delete file %s: %s" %(prj_dir + self.fname, e))
 
 #''' Create Subproject '''
-class ActionCreateSubPrj(Action):
+class ProjectCreate(Change):
     def make_change(self, prj_dir):
         dpath = prj_dir + self.fname[:self.fname.rindex("project.pj")]
         if not os.path.exists(dpath):
@@ -160,7 +162,7 @@ class ActionCreateSubPrj(Action):
                 os.makedirs(dpath)
 
 #''' Drop Subproject '''
-class ActionDropSubPrj(Action):
+class ProjectDrop(Change):
     def make_change(self, prj_dir):
         dpath = prj_dir + self.fname[:self.fname.rindex("project.pj")]
         try:
@@ -170,15 +172,15 @@ class ActionDropSubPrj(Action):
                 shutil.rmtree(dpath)
 
 #''' Supported actions in Change Package '''
-dict_str_class = { 'Add'                : ActionUpdate,
-                   'Add From Archive'   : ActionUpdate,         # extra
-                   'Create Subproject'  : ActionCreateSubPrj,
-                   'Add Subproject'     : ActionCreateSubPrj,   # extra
-                   'Update'             : ActionUpdate,
-                   'Update Revision'    : ActionUpdate,         # extra
-                   'Rename'             : ActionRename,
-                   'Drop'               : ActionDrop,
-                   'Drop Subproject'    : ActionDropSubPrj }
+dict_str_class = { 'Add'                : FileUpdate,
+                   'Add From Archive'   : FileUpdate,       # extra
+                   'Create Subproject'  : ProjectCreate,
+                   'Add Subproject'     : ProjectCreate,    # extra
+                   'Update'             : FileUpdate,
+                   'Update Revision'    : FileUpdate,       # extra
+                   'Rename'             : FileRename,
+                   'Drop'               : FileDrop,
+                   'Drop Subproject'    : ProjectDrop }
 
 class ChangePackage(object):
     def __init__(self, mks, id, viewinfo=True):
@@ -230,8 +232,7 @@ class ChangePackage(object):
                 self.add_change(action[0], action[2], action[3], action[4], ctime)
 
     def apply_change(self, prj, dest):
-        for act in self.actions:
-            act.apply_change(prj, dest+'/')
+        return all( action.apply_change(prj, dest) for action in self.actions )
 
     def update_fs(self, prj):
         for act in self.actions:
@@ -336,7 +337,7 @@ def mks2hg(prj_path, root_dir):
 
     # if hg already created, working on resync mode
     cp_syned = []
-    if os.path.exists(root_dir + '/' + '.hg'):
+    if os.path.exists(root_dir + '.hg'):
         cp_syned = hg_get_commited_cps(hg, root_dir)
     else:
         hg.init(root_dir)
@@ -348,12 +349,13 @@ def mks2hg(prj_path, root_dir):
     for cp in cps:
         cp.update_fs(root_prj)
 
-    #
     logging.info("Applying change packages...")
     for cp in cps:
         logging.debug(cp)
-        cp.apply_change(root_prj, root_dir)
-        hg_commit(hg, root_dir, cp)
+        if cp.apply_change(root_prj, root_dir):
+            hg_commit(hg, root_dir, cp)
+        else:
+            logging.debug("Ignore cp %s)" % cp.id)
 
 if __name__ == '__main__':
     usage = "usage: %prog [options] project directory"
@@ -369,4 +371,4 @@ if __name__ == '__main__':
         logging.basicConfig(level=logging.DEBUG)
     else:
         logging.basicConfig(level=logging.INFO)
-    mks2hg(args[0], args[1])
+    mks2hg(args[0], args[1] + '/')
