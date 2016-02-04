@@ -73,7 +73,7 @@ class Member(object):
         except Exception as e:
             logging.warn("unable to save file %s, %s" %(fpath, e))
 
-# Abstract action class
+# Abstract change class
 class Change(object):
     def __init__(self, mks, desc, ctime, fname, rev, prj):
         self.mks        = mks
@@ -125,7 +125,7 @@ class FileRename(Change):
         src = prj_dir + src
         dst = prj_dir + dst
         # in case dst already there,
-        # it means the wrong order of actions
+        # it means the wrong order of changes
         # in change package
         # so we just delete the src file.
         logging.debug("Rename file from %s to %s" % (src, dst))
@@ -171,7 +171,7 @@ class ProjectDrop(Change):
             if e.errno != errno.ENOENT:
                 shutil.rmtree(dpath)
 
-#''' Supported actions in Change Package '''
+#''' Supported changes in Change Package '''
 dict_str_class = { 'Add'                : FileUpdate,
                    'Add From Archive'   : FileUpdate,       # extra
                    'Create Subproject'  : ProjectCreate,
@@ -186,7 +186,7 @@ class ChangePackage(object):
     def __init__(self, mks, id, viewinfo=True):
         self.mks     = mks
         self.id      = id.strip()
-        self.actions = []
+        self.changes = []
         self.info    = None
         if viewinfo:
             self.view()
@@ -196,15 +196,17 @@ class ChangePackage(object):
         if self.info != None:
             for k, v in self.info.iteritems():
                 s += '(%-18s: %s)\n' % (k, v)
-        for a in self.actions:
+        for a in self.changes:
             s += str(a) + '\n'
         return s
 
-    def add_change(self, action, fname, revision, prj_path, ctime):
-        if action in dict_str_class:
-            self.actions.append(dict_str_class[action](self.mks, action, ctime, fname, revision, mks_get_project(self.mks, prj_path)))
+    def add_change(self, change, fname, revision, prj_path, ctime):
+        if change in dict_str_class:
+            self.changes.append(dict_str_class[change](self.mks, change, ctime,
+                                                       fname, revision,
+                                                       mks_get_project(self.mks, prj_path)))
         else:
-            logging.error("Unknown action %s" % action)
+            logging.error("Unknown change '%s' in cp %s" % (change, self.id))
 
     def is_closed(self):
         return self.info != None and self.info['closeddate'] != None
@@ -226,16 +228,16 @@ class ChangePackage(object):
                      'closeddate'   : ctime }
         for line in lines[2:]:
             if len(line) != 0:
-                action = line.strip().split('\t')
-                if len(action) < 5:
+                change = line.strip().split('\t')
+                if len(change) < 5:
                     continue
-                self.add_change(action[0], action[2], action[3], action[4], ctime)
+                self.add_change(change[0], change[2], change[3], change[4], ctime)
 
     def apply_change(self, prj, dest):
-        return all( action.apply_change(prj, dest) for action in self.actions )
+        return all( change.apply_change(prj, dest) for change in self.changes )
 
     def update_fs(self, prj):
-        for act in self.actions:
+        for act in self.changes:
             act.update_fs(prj)
 
 class Project(object):
